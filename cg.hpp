@@ -48,6 +48,7 @@ mVector CG_Solver::solve()
 	}
 	timer.stop();
 	std::cout << "Time elapsed: " << timer.elapse() << std::endl;
+	std::cout << "k =  " << k << std::endl;
 	return x;
 }
 

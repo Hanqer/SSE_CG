@@ -6,10 +6,47 @@
 #include <fstream>
 #include <xmmintrin.h>  
 #include <pmmintrin.h>
-#include <windows.h>
+#include <time.h>
+#include "pthread.h"
+#pragma comment(lib,"pthreadVC2.lib")
 
 class mVector;
 class mMatrix;
+class MyTimer;
+
+class MyTimer
+{
+private:
+	clock_t _freq;
+	clock_t _start;
+	clock_t _stop;
+public:
+
+	MyTimer()
+	{
+		_freq = CLOCKS_PER_SEC;
+	}
+
+	inline void start()
+	{
+		_start = clock();
+	}
+
+	inline void stop()
+	{
+		_stop = clock();
+	}
+
+	inline double elapse()
+	{
+		return 1e3 * double(_stop - _start) / _freq;
+	}
+
+	inline long long ticks()
+	{
+		return _stop - _start;
+	}
+};
 
 class mVector
 {
@@ -50,7 +87,7 @@ public:
 		sum = _mm_setzero_ps();
 		for (int i = 0; i < nloop; ++i)
 		{
-			m = _mm_loadu_ps(data + 4 * i);;
+			m = _mm_loadu_ps(data + 4 * i);
 			sum = _mm_add_ps(sum, m);
 		}
 		sum = _mm_hadd_ps(sum, sum);
@@ -59,7 +96,6 @@ public:
 		s = result[0];
 		delete result;
 #endif // PARAL
-		
 		return s;
 	}
 	mVector& operator=(const mVector &m)
@@ -104,7 +140,6 @@ public:
 			p3 += 4;
 		}
 #endif // PARAL
-
 		return res;
 	}
 
@@ -248,14 +283,70 @@ public:
 		return *this;
 	}
 
+	struct mul_thread_param
+	{
+		float *res;
+		float **data;
+		int size;
+		int length;
+		const mVector *b;
+	};
+
+	static void *mul_thread(void *arg)
+	{
+		
+		mul_thread_param *param = (struct mul_thread_param *)arg;
+		int length = param->length;
+		for (int i = 0; i < length; ++i)
+		{
+			param->res[i] = (mVector(param->data[i], param->size) * (*(param->b))).sum();
+		}
+		
+		return NULL;
+	}
+
 	mVector operator*(const mVector &other)
 	{
 		assert(other.size == col);
+		assert(col == row);
 		mVector res(row);
+		/*
+		MyTimer timer;
+		timer.start();
 		for (int i = 0; i < other.size; ++i)
 		{
 			res.data[i] = (mVector(data[i], col) * other).sum();
 		}
+		timer.stop();
+		std::cout << "Time elapsed: " << timer.elapse() << std::endl;
+		return res; 
+		*/
+		const int num_thread = 8;
+		const int offset = other.size / num_thread;
+		pthread_t *threads = new pthread_t[num_thread];
+		mul_thread_param *arg = new mul_thread_param[num_thread];
+		
+		MyTimer timer2;
+		timer2.start();
+		for (int i = 0; i < num_thread; ++i)
+		{
+			arg[i].res = res.data + i*offset;
+			arg[i].data = data + i*offset;
+			arg[i].size = col;
+			arg[i].b = &other;
+			arg[i].length = offset;
+			
+			pthread_create(&threads[i], NULL, mul_thread, arg + i);
+		}
+		
+		for (int i = 0, j = 0; i < other.size; i += offset, j++)
+		{
+			pthread_join(threads[j], NULL);
+		}
+		timer2.stop();
+		std::cout << "Time elapsed(outer): " << timer2.elapse() << std::endl;
+		delete threads;
+		delete arg; 
 		return res;
 	}
 
@@ -326,37 +417,5 @@ float t_mul(mVector &l, mVector &r)
 }
 
 
-class MyTimer
-{
-private:
-	LARGE_INTEGER _freq;
-	LARGE_INTEGER _start;
-	LARGE_INTEGER _stop;
-public:
 
-	MyTimer()
-	{
-		QueryPerformanceFrequency(&_freq);
-	}
-
-	inline void start()
-	{
-		QueryPerformanceCounter(&_start);
-	}
-
-	inline void stop()
-	{
-		QueryPerformanceCounter(&_stop);
-	}
-
-	inline double elapse()
-	{
-		return 1e3*(_stop.QuadPart - _start.QuadPart) / _freq.QuadPart;
-	}
-
-	inline long long ticks()
-	{
-		return _stop.QuadPart - _start.QuadPart;
-	}
-};
 #endif // !UTILS
